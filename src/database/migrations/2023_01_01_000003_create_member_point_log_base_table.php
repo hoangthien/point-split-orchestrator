@@ -14,21 +14,24 @@ return new class extends Migration
     {
         // This is just a reference table structure
         // The actual data will be stored in partitioned tables
-        Schema::create('member_point_log', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('member_id');
-            $table->unsignedBigInteger('customer_id');
-            $table->integer('points');
-            $table->string('description')->nullable();
-            $table->string('type')->nullable();
-            $table->timestamps();
-            
-            $table->foreign('member_id')->references('id')->on('members');
-            $table->foreign('customer_id')->references('id')->on('customers');
-            $table->index('member_id');
-            $table->index('customer_id');
-            $table->index('created_at');
-        });
+        // We're only creating this as a reference, it won't be used for actual data
+        if (!Schema::hasTable('member_point_log_reference')) {
+            Schema::create('member_point_log_reference', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('member_id');
+                $table->unsignedBigInteger('customer_id');
+                $table->integer('points');
+                $table->string('description')->nullable();
+                $table->string('type')->nullable();
+                $table->timestamps();
+                
+                $table->foreign('member_id')->references('id')->on('members');
+                $table->foreign('customer_id')->references('id')->on('customers');
+                $table->index('member_id');
+                $table->index('customer_id');
+                $table->index('created_at');
+            });
+        }
     }
 
     /**
@@ -36,6 +39,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('member_point_log');
+        Schema::dropIfExists('member_point_log_reference');
     }
 };

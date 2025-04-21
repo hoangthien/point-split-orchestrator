@@ -41,8 +41,9 @@ class MemberPointLog extends Model
             return $this->getPartitionedTableName($customerId, $year);
         }
 
-        // Default table name as a fallback
-        return 'member_point_log';
+        // For existing records, just return the current table name
+        // This shouldn't be called as we're not using the base table anymore
+        return parent::getTable();
     }
 
     /**
@@ -63,6 +64,41 @@ class MemberPointLog extends Model
         $model->save();
         
         return $model;
+    }
+
+    /**
+     * Update an existing record
+     */
+    public function update(array $attributes = [], array $options = [])
+    {
+        // If customer_id or created_at is being updated, ensure record is in the right table
+        if (isset($attributes['customer_id']) || isset($attributes['created_at'])) {
+            $customerId = $attributes['customer_id'] ?? $this->customer_id;
+            $createdAt = $attributes['created_at'] ?? $this->created_at;
+            $year = Carbon::parse($createdAt)->year;
+            
+            $newTable = $this->getPartitionedTableName($customerId, $year);
+            $currentTable = $this->getTable();
+            
+            // If table would change, move the record to the new table
+            if ($newTable !== $currentTable) {
+                // Ensure new table exists
+                $this->ensureTableExists($customerId, $year);
+                
+                // Create a copy in the new table and delete the old one
+                $attributes = array_merge($this->getAttributes(), $attributes);
+                $newModel = (new static)->setTable($newTable)->create($attributes);
+                
+                // Delete the old record
+                $this->delete();
+                
+                // Return the new model
+                return $newModel;
+            }
+        }
+        
+        // Normal update
+        return parent::update($attributes, $options);
     }
 
     /**

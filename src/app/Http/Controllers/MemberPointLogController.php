@@ -78,7 +78,8 @@ class MemberPointLogController extends Controller
         if ($query === null) {
             $results = collect([]);
         } else {
-            $results = $query->orderBy('created_at', 'desc')->paginate(15);
+            // Set pagination to 5 items per page
+            $results = $query->orderBy('created_at', 'desc')->paginate(5);
         }
         
         // Get related data for display
