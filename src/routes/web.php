@@ -1,10 +1,10 @@
-
 <?php
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\MemberPointLogController;
 use App\Http\Controllers\ExampleUsageController;
 use App\Http\Controllers\DemoQueryController;
+use App\Http\Controllers\BenchmarkController;
 
 /*
 |--------------------------------------------------------------------------
@@ -38,4 +38,13 @@ Route::prefix('demo-query')->group(function () {
     Route::get('/complex', [DemoQueryController::class, 'complexMultiQuery']);
     Route::get('/trait', [DemoQueryController::class, 'traitBasedQuery']);
     Route::get('/report', [DemoQueryController::class, 'aggregationReport']);
+});
+
+// Benchmark Performance routes
+Route::prefix('demo-perfor')->group(function () {
+    Route::get('/', [BenchmarkController::class, 'index']);
+    Route::get('/single-member', [BenchmarkController::class, 'singleMemberQuery']);
+    Route::get('/customer-aggregation', [BenchmarkController::class, 'customerAggregation']);
+    Route::get('/insertion-test', [BenchmarkController::class, 'insertionTest']);
+    Route::get('/comparative', [BenchmarkController::class, 'comparativeAnalysis']);
 });
