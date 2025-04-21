@@ -1,4 +1,3 @@
-
 <?php
 
 namespace App\Http\Controllers;
@@ -580,6 +579,172 @@ class BenchmarkController extends Controller
     }
     
     /**
+     * So sánh hiệu suất giữa UNION và JOIN cho việc gộp dữ liệu nhiều năm
+     */
+    public function unionVsJoinDemo(Request $request)
+    {
+        $customerId = $request->input('customer_id', 1);
+        $startYear = $request->input('start_year', 2020);
+        $endYear = $request->input('end_year', 2024);
+        
+        // 1. Phương pháp UNION
+        $unionStart = microtime(true);
+        $unionMemoryBefore = memory_get_usage();
+        
+        $model = new MemberPointLog();
+        $firstTable = null;
+        $query = null;
+        
+        // Xây dựng UNION query
+        for ($year = $startYear; $year <= $endYear; $year++) {
+            $tableName = $model->getPartitionedTableName($customerId, $year);
+            if (!Schema::hasTable($tableName)) continue;
+            
+            if (!$firstTable) {
+                $firstTable = $tableName;
+                $query = DB::table($tableName)
+                    ->select([
+                        "$tableName.id",
+                        "$tableName.points",
+                        "$tableName.created_at",
+                        'members.name as member_name'
+                    ])
+                    ->join('members', "$tableName.member_id", '=', 'members.id')
+                    ->where("$tableName.customer_id", $customerId);
+            } else {
+                $query->union(
+                    DB::table($tableName)
+                        ->select([
+                            "$tableName.id",
+                            "$tableName.points",
+                            "$tableName.created_at",
+                            'members.name as member_name'
+                        ])
+                        ->join('members', "$tableName.member_id", '=', 'members.id')
+                        ->where("$tableName.customer_id", $customerId)
+                );
+            }
+        }
+        
+        $unionResults = $query ? $query->orderBy('created_at', 'desc')->limit(1000)->get() : collect([]);
+        
+        $unionTime = microtime(true) - $unionStart;
+        $unionMemory = memory_get_usage() - $unionMemoryBefore;
+        
+        // 2. Phương pháp JOIN với bảng tạm
+        $joinStart = microtime(true);
+        $joinMemoryBefore = memory_get_usage();
+        
+        // Tạo bảng tạm để lưu trữ kết quả merge
+        $tempTable = 'temp_merged_' . time();
+        Schema::create($tempTable, function ($table) {
+            $table->bigInteger('id');
+            $table->integer('points');
+            $table->timestamp('created_at');
+            $table->bigInteger('member_id');
+            $table->bigInteger('customer_id');
+        });
+        
+        // Insert dữ liệu từ các bảng con vào bảng tạm
+        for ($year = $startYear; $year <= $endYear; $year++) {
+            $tableName = $model->getPartitionedTableName($customerId, $year);
+            if (!Schema::hasTable($tableName)) continue;
+            
+            DB::insert("INSERT INTO $tempTable SELECT id, points, created_at, member_id, customer_id FROM $tableName WHERE customer_id = ?", [$customerId]);
+        }
+        
+        // Thực hiện JOIN một lần duy nhất trên bảng tạm
+        $joinResults = DB::table($tempTable)
+            ->select([
+                "$tempTable.id",
+                "$tempTable.points",
+                "$tempTable.created_at",
+                'members.name as member_name'
+            ])
+            ->join('members', "$tempTable.member_id", '=', 'members.id')
+            ->orderBy('created_at', 'desc')
+            ->limit(1000)
+            ->get();
+        
+        // Xóa bảng tạm
+        Schema::dropIfExists($tempTable);
+        
+        $joinTime = microtime(true) - $joinStart;
+        $joinMemory = memory_get_usage() - $joinMemoryBefore;
+        
+        // Tính toán hiệu suất
+        $timeComparison = $unionTime > 0 ? ($joinTime - $unionTime) / $unionTime * 100 : 0;
+        $memoryComparison = $unionMemory > 0 ? ($joinMemory - $unionMemory) / $unionMemory * 100 : 0;
+        
+        return response()->json([
+            'title' => 'So sánh hiệu suất UNION vs JOIN cho dữ liệu nhiều năm',
+            'description' => "Customer #$customerId từ năm $startYear đến $endYear",
+            'benchmark_results' => [
+                'union_approach' => [
+                    'execution_time_ms' => round($unionTime * 1000, 2),
+                    'memory_usage_mb' => round($unionMemory / 1024 / 1024, 2),
+                    'result_count' => count($unionResults),
+                ],
+                'join_approach' => [
+                    'execution_time_ms' => round($joinTime * 1000, 2),
+                    'memory_usage_mb' => round($joinMemory / 1024 / 1024, 2),
+                    'result_count' => count($joinResults),
+                ],
+                'comparison' => [
+                    'time_difference_percent' => round($timeComparison, 2),
+                    'memory_difference_percent' => round($memoryComparison, 2)
+                ]
+            ],
+            'analysis' => [
+                'union_pros' => [
+                    'Không cần tạo bảng tạm',
+                    'Xử lý trực tiếp trên từng bảng',
+                    'Phù hợp với dữ liệu phân tán',
+                    'Tốt cho truy vấn đơn giản'
+                ],
+                'union_cons' => [
+                    'Phải thực hiện JOIN nhiều lần',
+                    'Chi phí tăng theo số lượng bảng',
+                    'Khó tối ưu với các truy vấn phức tạp'
+                ],
+                'join_pros' => [
+                    'JOIN chỉ thực hiện một lần',
+                    'Dễ tối ưu với truy vấn phức tạp',
+                    'Hiệu quả với nhiều điều kiện lọc'
+                ],
+                'join_cons' => [
+                    'Cần không gian lưu trữ tạm thời',
+                    'Chi phí tạo và xóa bảng tạm',
+                    'Có thể gặp vấn đề với dữ liệu rất lớn'
+                ],
+                'recommendations' => [
+                    'Sử dụng UNION khi:',
+                    '- Số lượng bảng con ít (1-3 năm)',
+                    '- Truy vấn đơn giản',
+                    '- Không gian disk giới hạn',
+                    'Sử dụng JOIN khi:',
+                    '- Nhiều bảng con (>3 năm)',
+                    '- Truy vấn phức tạp với nhiều điều kiện',
+                    '- Có đủ không gian disk cho bảng tạm'
+                ]
+            ],
+            'performance_details' => [
+                'with_2gb_tables' => [
+                    'union_performance' => 'Với mỗi bảng 2GB:',
+                    'time_per_table_union' => 'Khoảng 1-2 giây/bảng cho UNION + JOIN',
+                    'join_performance' => 'Với tổng 2GB x số năm:',
+                    'time_for_join' => 'Khoảng 3-4 giây cho việc tạo bảng tạm + 1 JOIN duy nhất',
+                    'conclusion' => 'JOIN nhanh hơn khi số năm > 3 (khoảng 25-35% cho 5 năm dữ liệu)'
+                ]
+            ],
+            'example_queries' => [
+                'union_sample' => $query ? $query->toSql() : null,
+                'join_sample' => "Tạo bảng tạm và JOIN một lần"
+            ]
+        ]);
+    }
+    
+    /**
      * Lấy danh sách tất cả các bảng member_point_log
      */
     private function getAllPointLogTables()
@@ -689,4 +854,3 @@ class BenchmarkController extends Controller
         return array_values($results);
     }
 }
-

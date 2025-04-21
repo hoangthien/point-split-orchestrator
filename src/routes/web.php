@@ -47,4 +47,5 @@ Route::prefix('demo-perfor')->group(function () {
     Route::get('/customer-aggregation', [BenchmarkController::class, 'customerAggregation']);
     Route::get('/insertion-test', [BenchmarkController::class, 'insertionTest']);
     Route::get('/comparative', [BenchmarkController::class, 'comparativeAnalysis']);
+    Route::get('/union-vs-join', [BenchmarkController::class, 'unionVsJoinDemo'])->name('demo-perfor.union-vs-join');
 });
